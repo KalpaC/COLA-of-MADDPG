@@ -1,0 +1,44 @@
+# --- Defaults ---
+
+# --- global ---
+env: ""
+
+
+# --- use in main ---
+use_cuda: True
+
+use_tensorboard: True
+
+
+
+# --- use in run ---
+
+# "": no checkpoint are banned
+# "D:\checkpoint": absolute path to checkpoint dir
+# "checkpoint": relative path to checkpoint dir
+checkpoint_path: ""
+
+# 0: load the max time step in checkpoint list
+# >0: load the closest time step to LOAD_STEP in checkpoint list
+load_step: 0
+
+# True: run in evaluate mode
+# False: run in train mode
+evaluate: True
+
+# 不理解
+save_replay: True
+
+# 训练最大步数
+t_max: 10
+
+
+
+# --- use in runner ---
+# 同时运行的线程？
+batch_size_run: 32
+
+
+
+
+

@@ -6,3 +6,5 @@ from .v2x.mode_4_in_3gpp import Mode_4_in_3GPP
 REGISTRY = {
     "V2X": Mode_4_in_3GPP
 }
+
+
