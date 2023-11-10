@@ -1,1 +1,5 @@
-# __init__.py 2023/11/1 14:41
+REGISTRY = {}
+
+from .basic_controller import BasicMAC
+
+REGISTRY["basic_mac"] = BasicMAC
