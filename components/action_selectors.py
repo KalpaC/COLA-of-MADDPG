@@ -5,7 +5,7 @@ from .epsilon_schedules import DecayThenFlatSchedule
 REGISTRY = {}
 
 
-class MultinomialActionSelector():
+class MultinomialActionSelector:
 
     def __init__(self, args):
         self.args = args
@@ -32,7 +32,7 @@ class MultinomialActionSelector():
 REGISTRY["multinomial"] = MultinomialActionSelector
 
 
-class EpsilonGreedyActionSelector():
+class EpsilonGreedyActionSelector:
 
     def __init__(self, args):
         self.args = args

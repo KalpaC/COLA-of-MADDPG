@@ -53,17 +53,11 @@ class EpisodeRunner:
         self.mac.init_hidden(batch_size=self.batch_size)
 
         while not terminated:
-            # pre_transition_data = {
-            #     "state": [self.env.get_state()],
-            #     "avail_actions": [self.env.get_avail_actions()],
-            #     "obs": [self.env.get_obs()],
-            #     "alive_allies": self.env.get_alive_agents(),
-            # }
+
             pre_transition_data = {
                 "pre_state": [self.env.get_state()],
-                # "avail_actions": [self.env.get_avail_actions()],
-                "pre_obs": [self.env.get_obs()],
-                # "alive_allies": self.env.get_alive_agents(),
+                "avail_actions": [self.env.get_avail_actions()],
+                "pre_obs": [self.env.get_obs()]
             }
             self.batch.update(pre_transition_data, ts=self.t)
 
@@ -74,11 +68,6 @@ class EpisodeRunner:
             reward, terminated, env_info = self.env.step(actions[0])
             episode_return += reward
 
-            # post_transition_data = {
-            #     "actions": actions,
-            #     "reward": [(reward,)],
-            #     "terminated": [(terminated != env_info.get("episode_limit", False),)],
-            # }
             post_transition_data = {
                 "actions": actions,
                 "reward": [(reward,)],
@@ -86,20 +75,7 @@ class EpisodeRunner:
                 "post_obs": [self.env.get_obs()],
             }
             self.batch.update(post_transition_data, ts=self.t)
-
             self.t += 1
-
-        # last_data = {
-        #     "state": [self.env.get_state()],
-        #     "avail_actions": [self.env.get_avail_actions()],
-        #     "obs": [self.env.get_obs()],
-        #     "alive_allies": self.env.get_alive_agents(),
-        # }
-        # self.batch.update(last_data, ts=self.t)
-        #
-        # # Select actions in the last stored state
-        # actions = self.mac.select_actions(self.batch, t_ep=self.t, t_env=self.t_env, test_mode=test_mode)
-        # self.batch.update({"actions": actions}, ts=self.t)
 
         # log info
         cur_stats = self.test_stats if test_mode else self.train_stats
