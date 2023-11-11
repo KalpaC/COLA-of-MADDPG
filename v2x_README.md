@@ -126,9 +126,13 @@ def run_sequential(args, logger):
 
    我们不使用RNN作为agent主体，而采用mlp。不过后续可以考虑使用RNN来保留一个episode内的时序关系。
 
+   已完成
+
 2. runner的设计
 
    主要接口是run方法，其余方法或作为辅助或在其他函数中有调用。等待进一步探索。
+
+   已完成
 
 3. **learner的设计**
 
@@ -257,7 +261,13 @@ def __init__(self, scheme, groups, args):
    input_shape = self._get_input_shape(scheme)
    ```
 
-2. 一方面用于区分是否使用consensus_builder，另一方面
+2. 根据输入shape为每个agent构建网络
+
+   ```python
+   self._build_agents(input_shape)
+   ```
+   
+3. 一方面用于区分是否使用consensus_builder，以及使用方法，但是没太懂。
 
    ```python
    if self.args.input == 'hidden':
@@ -265,3 +275,141 @@ def __init__(self, scheme, groups, args):
    elif self.args.input == 'obs':
        self._build_consensus_builder(input_shape)
    ```
+
+4. 初始化action_selector，后续将展开说明。
+
+   ```python
+   self.action_selector = action_REGISTRY[args.action_selector](args)
+   ```
+
+5. 用于——
+
+   ```python
+   self.hidden_states = None
+   ```
+
+### 动作选择
+
+```python
+def select_actions(self, ep_batch, t_ep, t_env, bs=slice(None), test_mode=False):
+    # Only select actions for the selected batch elements in bs
+    avail_actions = ep_batch["avail_actions"][:, t_ep]
+    agent_outputs = self.forward(ep_batch, t_ep, test_mode=test_mode)
+    chosen_actions = self.action_selector.select_action(agent_outputs[bs], avail_actions[bs], t_env,test_mode=test_mode)
+    return chosen_actions
+```
+
+1. 获取可用动作，在我们的问题里没有这个字段
+2. 利用forward获取网络输出的动作
+3. 再通过action_selector来根据某种策略选择动作。例如epsilon-greedy
+
+### 前向传播
+
+```python
+def forward(self, ep_batch, t, test_mode=False):
+```
+
+主要代码用于利用consensus计算共识了，我们基本不太需要。但在此也分析一遍。
+
+1. 构建真正的神经网络输入
+
+   ```python
+   agent_inputs = self._build_inputs(ep_batch, t)
+   ```
+
+   主要工作就是把需要的数据从batch中取出来，然后添加一些数据，再展平。
+
+2. rnn的机制与共识机制
+   ```python
+   self.hidden_states = self.agent.calc_hidden(agent_inputs, self.hidden_states)
+   with th.no_grad():
+       if self.args.input == 'hidden':
+           latent_state = self.consensus_builder.calc_student(self.hidden_states)
+       elif self.args.input == 'obs':
+           latent_state = self.consensus_builder.calc_student(agent_inputs)
+   
+       # latent_state = latent_state - latent_state.max(-1, keepdim=True)[0].detach()
+       latent_state_id = F.softmax(latent_state, dim=-1).detach().max(-1)[1].unsqueeze(-1)
+       latent_state_id[
+           ep_batch['alive_allies'][:, t].reshape(*latent_state_id.size()) == 0] = self.args.consensus_builder_dim
+       latent_state_embedding = self.embedding_net(latent_state_id.squeeze(-1))
+   agent_outs = self.agent.calc_value(latent_state_embedding, self.hidden_states)
+   ```
+   hidden_states是rnn的中间输出。通过保存该层输出，实现环境和RNN的一同迭代。
+
+   剩余部分主要处理了结合consensus的代码。我们使用consensus时大概率要进行修改。
+   
+3. 对于不可用动作进行mask
+
+   ```python
+   # Softmax the agent outputs if they're policy logits
+   if self.agent_output_type == "pi_logits":
+   
+       if getattr(self.args, "mask_before_softmax", True):
+           # Make the logits for unavailable actions very negative to minimise their affect on the softmax
+           reshaped_avail_actions = avail_actions.reshape(ep_batch.batch_size * self.n_agents, -1)
+           agent_outs[reshaped_avail_actions == 0] = -1e10
+   
+       agent_outs = th.nn.functional.softmax(agent_outs, dim=-1)
+       if not test_mode:
+           # Epsilon floor
+           epsilon_action_num = agent_outs.size(-1)
+           if getattr(self.args, "mask_before_softmax", True):
+               # With probability epsilon, we will pick an available action uniformly
+               epsilon_action_num = reshaped_avail_actions.sum(dim=1, keepdim=True).float()
+   
+           agent_outs = ((1 - self.action_selector.epsilon) * agent_outs
+                         + th.ones_like(agent_outs) * self.action_selector.epsilon / epsilon_action_num)
+   
+           if getattr(self.args, "mask_before_softmax", True):
+               # Zero out the unavailable actions
+               agent_outs[reshaped_avail_actions == 0] = 0.0
+   ```
+
+### 构建agent网络
+
+该代码在多agent之间进行了参数共享，实际上只用了一个网络。那么是如何一次性取得多个agent的动作的呢？
+
+通过_build_inputs函数并结合episode_batch的结构可以得到答案
+
+```python
+def _build_inputs(self, batch, t):
+    # Assumes homogenous agents with flat observations.
+    # Other MACs might want to e.g. delegate building inputs to each agent
+    bs = batch.batch_size
+    inputs = []
+    inputs.append(batch["obs"][:, t])  # b1av
+    if self.args.obs_last_action:
+        if t <= 0:
+            inputs.append(th.zeros_like(batch["actions_onehot"][:, t]))
+        else:
+            inputs.append(batch["actions_onehot"][:, t-1])
+    if self.args.obs_agent_id:
+        inputs.append(th.eye(self.n_agents, device=batch.device).unsqueeze(0).expand(bs, -1, -1))
+
+    inputs = th.cat([x.reshape(bs*self.n_agents, -1) for x in inputs], dim=1)
+    return inputs
+```
+
+此处：
+
+```python
+inputs.append(batch["obs"][:, t])  # b1av
+```
+
+这一行最关键的一点是，加入到inputs的数据结构是一个形状为[n_agents, ...]的张量。这首先意味着每个agent的数据是区分开的，即：$inputs[0][i]$表示的是i号agent的obs数据。
+
+最后，
+
+```python
+inputs = th.cat([x.reshape(bs*self.n_agents, -1) for x in inputs], dim=1)
+```
+
+reshape的目的是将batch引入的维度和n_agents引入的维度融合，并将剩余的维度展平。然后通过cat在dim=1的维度上拼接从而得到一个二维数组，$\text{shape=(bs*self.n_agents, input_shape)}$。
+
+当这样的数组输入给网络时，第一维会被解释为batch，也就是等价于网络对inputs[0], inputs[1]...依次进行计算。从而利用网络对batch的支持，实现n个agent的运算（当然如果bs不等于1，后面为了拆分出每个batch的输入肯定还要再运算的）。
+
+
+
+### 四、环境需要实现什么？
+
