@@ -56,6 +56,8 @@ class Mode_4_in_3GPP(MultiAgentEnv):
             seed=7777,
     ):
         # map_args:
+        self.n_actions = resource_blocks * len(V2V_power_levels)
+        self.n_agents = veh_amount * neighbor_amount
         self.map_shape = map_shape
         self.grid_x_length = grid_x_length
         self.grid_y_length = grid_y_length
@@ -203,7 +205,6 @@ class Mode_4_in_3GPP(MultiAgentEnv):
         self.is_active = np.ones((self.veh_amount, self.neighbor_amount), dtype='bool')
 
     def _renew_positions(self):
-        # 论文作者给出的位置更新函数，基于该函数可以得到与论文相对接近的结果
         i = 0
         while i < len(self.vehicles):
             delta_distance = self.vehicles[i].velocity * self.time_slow
@@ -331,6 +332,22 @@ class Mode_4_in_3GPP(MultiAgentEnv):
 
             i += 1
 
+        # 更新邻居
+        def get_destination():
+            # 找到对每辆车找到距离它最近的self.n_des辆车
+            # 每次更新位置之后都需要重新判断，因为数据包的有效期恰好也过了
+            positions = np.array([c.position for c in self.vehicles])
+            distance = np.zeros((self.veh_amount, self.veh_amount))
+            for i in range(self.veh_amount):
+                for j in range(self.veh_amount):
+                    # np.linalg.norm用于计算向量的模，此处可以用于计算两点间距离
+                    distance[i][j] = np.linalg.norm(positions[i] - positions[j])
+            for i in range(self.veh_amount):
+                sort_idx = np.argsort(distance[:, i])
+                self.vehicles[i].destinations = sort_idx[1:1 + self.veh_amount]
+
+        get_destination()
+
     def get_action_space(self):
         return list(range(0, self.resource_blocks * len(self.V2V_power_levels)))
 
@@ -339,8 +356,12 @@ class Mode_4_in_3GPP(MultiAgentEnv):
         power = self.V2V_power_levels[action / self.resource_blocks]
         return block_id, power
 
+    def episode_renew(self):
+        self._renew_positions()
+        self.channel.renew()
+
     def step(self, actions):
-        block_id, power = self._get_agents_actions(actions)
+        block_id, power = self._get_agents_actions(actions)  # 返回agents实际选择的rb编号列表数组以及功率数组
         V2V_rate = self.channel.get_V2V_rate(self.is_active, block_id, power, self.V2I_power)
         V2I_rate = self.channel.get_V2I_rate(self.is_active, block_id, power, self.V2I_power)
         self.remain_payload -= (V2V_rate * self.time_slow * self.bandwidth).astype('int32')
@@ -351,14 +372,29 @@ class Mode_4_in_3GPP(MultiAgentEnv):
         reward_elements[self.remain_payload <= 0] = 1
         self.is_active[np.multiply(self.is_active, self.remain_payload <= 0)] = 0
         l = 0.1
-        reward = l * np.sum(V2I_rate) / (self.veh_amount * 10) + (1 - l) * np.sum(reward_elements) / (self.veh_amount * self.neighbor_amount)
-        return reward, self.remain_time == 0, ""
+        reward = l * np.sum(V2I_rate) / (self.veh_amount * 10) + (1 - l) * np.sum(reward_elements) / (
+                self.veh_amount * self.neighbor_amount)
+        # 添加信道更新以及干扰计算
+        self.channel.renew_fastfading()
+        self.channel.get_V2V_rate(self.is_active, block_id, power, self.V2I_power)
+        return reward, self.remain_time == 0, {}
 
     def get_obs(self):
-        pass
+        agents_obs = [self.get_obs_agent(i) for i in range(self.n_agents)]
+        return agents_obs
 
     def get_obs_agent(self, agent_id):
-        pass
+        veh_id, nei_id = agent_id // self.neighbor_amount, agent_id % self.neighbor_amount
+        demand = self.remain_payload[veh_id][nei_id] / self.payload_size
+        remain_time = self.remain_time / self.time_slow
+        V2V_interference_dB = self.channel.V2V_Interference_cache[veh_id][nei_id]
+        V2I_fast = self.channel.V2I_channels_with_fastfading[veh_id, :] - self.channel.V2I_channels_abs[veh_id]
+        V2V_fast = self.channel.V2V_channels_with_fastfading[:, self.vehicles[veh_id].neighbors[nei_id], :] \
+                   - self.channel.V2V_channels_abs[:, self.vehicles[veh_id].neighbors[nei_id]]
+        V2V_abs = self.channel.V2V_channels_abs[:, self.vehicles[veh_id].neighbors[nei_id], :]
+        V2I_abs = self.channel.V2I_channels_abs[veh_id]
+        obs = [demand, remain_time, V2V_interference_dB, V2I_fast, V2V_fast, V2V_abs, V2I_abs]
+        return np.concatenate([np.asarray([x]).reshape(-1) for x in obs])
 
     def get_obs_size(self):
         pass
