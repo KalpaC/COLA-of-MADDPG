@@ -1,11 +1,12 @@
 import datetime
 import os
 import pprint
+import sys
 import time
 import threading
 import torch as th
 from types import SimpleNamespace as SN
-from utils.logger import Logger
+from utils.sacredlogger import SacredLogger, get_track_logger
 from utils.timehelper import time_left, time_str
 from os.path import dirname, abspath
 
@@ -17,7 +18,6 @@ from components.transforms import OneHot
 
 
 def run(_run, _config, _log):
-
     # check args sanity
     _config = args_sanity_check(_config, _log)
 
@@ -25,7 +25,7 @@ def run(_run, _config, _log):
     args.device = "cuda" if args.use_cuda else "cpu"
 
     # setup loggers
-    logger = Logger(_log)
+    logger = SacredLogger(_log)
 
     _log.info("Experiment Parameters:")
     experiment_params = pprint.pformat(_config,
@@ -64,7 +64,6 @@ def run(_run, _config, _log):
 
 
 def evaluate_sequential(args, runner):
-
     for _ in range(args.test_nepisode):
         runner.run(test_mode=True)
 
@@ -73,8 +72,8 @@ def evaluate_sequential(args, runner):
 
     runner.close_env()
 
-def run_sequential(args, logger):
 
+def run_sequential(args, logger):
     # Init runner so we can get env info
     runner = r_REGISTRY[args.runner](args=args, logger=logger)
 
@@ -93,6 +92,7 @@ def run_sequential(args, logger):
         "reward": {"vshape": (1,)},
         "terminated": {"vshape": (1,), "dtype": th.uint8},
         "alive_allies": {"vshape": (env_info["n_agents"],)},
+        "post_obs": {"vshape": env_info["obs_shape"], "group": "agents"}
     }
     groups = {
         "agents": args.n_agents
@@ -100,14 +100,12 @@ def run_sequential(args, logger):
     preprocess = {
         "actions": ("actions_onehot", [OneHot(out_dim=args.n_actions)])
     }
-
     buffer = ReplayBuffer(scheme, groups, args.buffer_size, env_info["episode_limit"] + 1,
                           preprocess=preprocess,
                           device="cpu" if args.buffer_cpu_only else args.device)
 
     # Setup multiagent controller here
     mac = mac_REGISTRY[args.mac](buffer.scheme, groups, args)
-
     # Give runner the scheme
     runner.setup(scheme=scheme, groups=groups, preprocess=preprocess, mac=mac)
 
@@ -167,9 +165,11 @@ def run_sequential(args, logger):
         episode_batch = runner.run(test_mode=False)
         buffer.insert_episode_batch(episode_batch)
 
-
         if buffer.can_sample(args.batch_size):
-            episode_sample = buffer.sample(args.batch_size)
+            print("ready to train")
+            get_track_logger().info("ready to train")
+
+            episode_sample = buffer.sample(args.batch_size, shuffle=getattr(args, "shuffle", False))
 
             # Truncate batch to only filled timesteps
             max_ep_t = episode_sample.max_t_filled()
@@ -196,7 +196,7 @@ def run_sequential(args, logger):
         if args.save_model and (runner.t_env - model_save_time >= args.save_model_interval or model_save_time == 0):
             model_save_time = runner.t_env
             save_path = os.path.join(args.local_results_path, "models", args.unique_token, str(runner.t_env))
-            #"results/models/{}".format(unique_token)
+            # "results/models/{}".format(unique_token)
             os.makedirs(save_path, exist_ok=True)
             logger.console_logger.info("Saving models to {}".format(save_path))
 
@@ -216,7 +216,6 @@ def run_sequential(args, logger):
 
 
 def args_sanity_check(config, _log):
-
     # set CUDA flags
     # config["use_cuda"] = True # Use cuda whenever possible!
     if config["use_cuda"] and not th.cuda.is_available():
@@ -226,6 +225,6 @@ def args_sanity_check(config, _log):
     if config["test_nepisode"] < config["batch_size_run"]:
         config["test_nepisode"] = config["batch_size_run"]
     else:
-        config["test_nepisode"] = (config["test_nepisode"]//config["batch_size_run"]) * config["batch_size_run"]
+        config["test_nepisode"] = (config["test_nepisode"] // config["batch_size_run"]) * config["batch_size_run"]
 
     return config

@@ -3,6 +3,7 @@
 希望未来的全部multi-agent问题均可以此为基类
 """
 
+
 class MultiAgentEnv(object):
 
     def step(self, actions):
@@ -61,5 +62,6 @@ class MultiAgentEnv(object):
                     "obs_shape": self.get_obs_size(),
                     "n_actions": self.get_total_actions(),
                     "n_agents": self.n_agents,
-                    "episode_limit": self.episode_limit}
+                    "episode_limit": self.episode_limit
+                    }
         return env_info

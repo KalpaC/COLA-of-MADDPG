@@ -8,14 +8,15 @@ from sacred.observers import FileStorageObserver
 from sacred.utils import apply_backspaces_and_linefeeds
 import sys
 import torch as th
-from utils.logger import get_logger
+from utils import setup_logger
 import yaml
 import logging
 
 from run import run
 
 SETTINGS['CAPTURE_MODE'] = "fd"  # set to "no" if you want to see stdout/stderr in console
-logger = get_logger()  # only a console_logger
+logger = setup_logger()  # only a console_logger
+
 
 ex = Experiment("marl_for_v2x")
 
@@ -23,7 +24,6 @@ ex.logger = logger  # so we could get _log in "my_main".
 ex.captured_out_filter = apply_backspaces_and_linefeeds
 
 results_path = os.path.join(dirname(dirname(abspath(__file__))), "results")
-
 
 @ex.main
 def my_main(_run, _config, _log):
@@ -37,10 +37,6 @@ def my_main(_run, _config, _log):
     # 干啥用的？
     th.backends.cudnn.benchmark = False
     th.backends.cudnn.deterministic = True
-
-    _log.info("my_main地址为{}".format(id(my_main)))
-    _log.info("_run地址为{}".format(id(_run)))
-    _log.info("run地址为{}".format(id(run)))
 
     # run the framework
     run(_run, config, _log)

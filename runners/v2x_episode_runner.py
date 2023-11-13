@@ -1,3 +1,5 @@
+import logging
+
 from envs import REGISTRY as env_REGISTRY
 from functools import partial
 from components.episode_buffer import EpisodeBatch
@@ -46,18 +48,16 @@ class EpisodeRunner:
         self.t = 0
 
     def run(self, test_mode=False):
-        self.reset()
+        self.reset()  # 执行了环境的大尺度更新
 
         terminated = False
         episode_return = 0
-        self.mac.init_hidden(batch_size=self.batch_size)
-
         while not terminated:
-
+            self.logger.console_logger.info("t_env: {}, t: {}".format(self.t_env, self.t))
             pre_transition_data = {
-                "pre_state": [self.env.get_state()],
+                # "state": [self.env.get_state()],
                 "avail_actions": [self.env.get_avail_actions()],
-                "pre_obs": [self.env.get_obs()]
+                "obs": [self.env.get_obs()]
             }
             self.batch.update(pre_transition_data, ts=self.t)
 
@@ -71,7 +71,6 @@ class EpisodeRunner:
             post_transition_data = {
                 "actions": actions,
                 "reward": [(reward,)],
-                "post_state": [self.env.get_state()],
                 "post_obs": [self.env.get_obs()],
             }
             self.batch.update(post_transition_data, ts=self.t)

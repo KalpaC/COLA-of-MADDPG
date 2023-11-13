@@ -1,11 +1,12 @@
 # channel_buffer 2023/10/22 22:29
+import logging
 import math
 
 import numpy as np
 from .v2v_calculator import V2V_Calculator
 from .v2i_calculator import V2I_Calculator
-from formula import to_w
-
+from .formula import to_w
+from utils import get_track_logger
 
 class Channel:
     def __init__(self,
@@ -54,7 +55,7 @@ class Channel:
         self.V2I_channels_abs = np.empty(veh_amount)
 
         self.V2V_channels_with_fastfading = np.empty((veh_amount, veh_amount, resource_blocks))
-        self.V2I_channels_with_fastfading = np.empty(veh_amount, resource_blocks)
+        self.V2I_channels_with_fastfading = np.empty((veh_amount, resource_blocks))
 
         self.v2vc = V2V_Calculator(carry_frequency, veh_ant_height, V2V_decorrelation_distance, V2V_shadow_std)
         self.v2ic = V2I_Calculator(veh_ant_height, bs_ant_height, V2I_decorrelation_distance, V2I_shadow_std,
@@ -104,10 +105,10 @@ class Channel:
     def _clear_cache(self):
         self.V2V_rate_cache = None
         self.V2I_rate_cache = None
-        self.V2V_Interference_cache = None
+
 
     def get_V2V_rate(self, is_active, block_id, V2V_power_dB, V2I_power_dB):
-        if self.V2V_rate_cache:
+        if self.V2V_rate_cache is not None:
             return self.V2V_rate_cache
         V2V_Interference = np.zeros((len(self.vehicles), self.n_des))
         V2V_Signal = np.zeros((len(self.vehicles), self.n_des))
@@ -146,7 +147,7 @@ class Channel:
         return V2V_Rate
 
     def get_V2I_rate(self, is_active, block_id, V2V_power_dB, V2I_power_dB):
-        if self.V2I_rate_cache:
+        if self.V2I_rate_cache is not None:
             return self.V2I_rate_cache
         V2I_Interference = np.zeros(self.n_RB)  # V2I interference
         for i in range(len(self.vehicles)):

@@ -1,8 +1,7 @@
-env: sample
+env: v2x_mode4
 
 env_args:
   #map_args:
-  map_shape: "rectangle"
   grid_x_length: 250 #m
   grid_y_length: 433 #m
   lane_width: 3.5 #m
@@ -29,13 +28,13 @@ env_args:
   resource_blocks: 4
   bandwidth: 1 #MHz
 
-  sig2_dB : -114 #dB
+  sig2_dB: -114 #dB
 
   #  V2V_args
   V2V_decorrelation_distance: 10 #m
   V2V_shadow_std: 3 #dB
   neighbor_amount: 1
-  V2V_power_levels: (23,10,5,-100) # dB
+  V2V_power_levels: [23,10,5,-100] # dB
 
   #  V2I_args
   V2I_decorrelation_distance: 50 #m

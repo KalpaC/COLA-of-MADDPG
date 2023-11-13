@@ -1,5 +1,4 @@
 # fingerprint_controller 2023/11/10 23:17
-
 from modules.agents import REGISTRY as agent_REGISTRY
 from components.action_selectors import REGISTRY as action_REGISTRY
 import torch as th
@@ -22,10 +21,14 @@ class FingerPrintMAC:
         agent_outputs = self.forward(ep_batch, t_ep, t_env, test_mode=test_mode)
         chosen_actions = self.action_selector.select_action(agent_outputs[bs], avail_actions[bs], t_env,
                                                             test_mode=test_mode)
-        return chosen_actions
+        if th.is_tensor(chosen_actions) and chosen_actions.device.type=="cuda":
+            tmp = chosen_actions
+            chosen_actions = chosen_actions.to("cpu")
+            del tmp
+        return chosen_actions.numpy()
 
-    def forward(self, ep_batch, t_ep, t_env, test_mode=False):
-        agent_inputs = self._build_inputs(ep_batch, t_ep, t_env, test_mode)
+    def forward(self, ep_batch, t_ep, t_env, test_mode=False, by_post_obs=False):
+        agent_inputs = self._build_inputs(ep_batch, t_ep, t_env, test_mode, by_post_obs)
         agent_outs = self.agent.calc_value(agent_inputs)
         return agent_outs.view(ep_batch.batch_size, self.n_agents, -1)
 
@@ -44,9 +47,9 @@ class FingerPrintMAC:
     def _build_agents(self, input_shape):
         self.agent = agent_REGISTRY[self.args.agent](input_shape, self.args)
 
-    def _build_inputs(self, batch, t_ep, t_env, test_mode):
+    def _build_inputs(self, batch, t_ep, t_env, test_mode, by_post_obs):
         bs = batch.batch_size
-        inputs = [batch["obs"][:, t_ep]]
+        inputs = [batch["obs" if not by_post_obs else "post_obs"][:, t_ep]]
         # t时间下的obs自然包括n_agents的全部局部观察，注意batch["obs"][:, t]得到的
         if self.args.obs_last_action:
             # 意思是是否将上一次的行动作为环境传入
@@ -71,5 +74,7 @@ class FingerPrintMAC:
             input_shape += scheme["actions_onehot"]["vshape"][0]
         if self.args.obs_agent_id:
             input_shape += self.n_agents
+        if self.args.finger_print:
+            input_shape += 2
 
         return input_shape

@@ -413,3 +413,102 @@ reshape的目的是将batch引入的维度和n_agents引入的维度融合，并
 
 ### 四、环境需要实现什么？
 
+
+
+### 五、QLearner
+
+qlearner是最简单的多智能体训练方法，一般使用double DQN，根据算法不同可以引入不同的mix算法，例如vdn，qmix等。这里先不考虑这几种情况。
+
+我们主要关注train函数
+
+```python
+def train(self, batch: EpisodeBatch, t_env: int, episode_num: int):
+```
+
+1. 取出奖励、动作以及可选动作
+
+   ```python
+   rewards = batch["reward"][:, :-1]
+   actions = batch["actions"][:, :-1]
+   # terminated = batch["terminated"][:, :-1].float()
+   # mask = batch["filled"][:, :-1].float()
+   # mask[:, 1:] = mask[:, 1:] * (1 - terminated[:, :-1])
+   avail_actions = batch["avail_actions"]
+   ```
+
+   对于基于时间序列的问题，需要使用mask为每个时间步掩盖掉后续时间步的影响。最后一个时间步被删去。
+
+2. 获取Q值
+
+   ```python
+   # Calculate estimated Q-Values
+   mac_out = []
+   self.mac.init_hidden(batch.batch_size)
+   for t in range(batch.max_seq_length):
+       agent_outs = self.mac.forward(batch, t)
+       mac_out.append(agent_outs)
+   mac_out = th.stack(mac_out, dim=1)  # Concat over time
+   ```
+
+   这是基于rnn的实现方式。由于我们不认为相邻时间步之间有相关性，所以要修改写法。
+
+   实际上只需要删掉init_hidden，并给添加forward添加个参数t_env即可。
+
+3. 根据transition中的action，挑选出该时间步action的q值
+
+   ```python
+   # Pick the Q-Values for the actions taken by each agent
+   chosen_action_qvals = th.gather(mac_out[:, :], dim=3, index=actions).squeeze(3)  # Remove the last dim
+   ```
+
+   注意mac_out的shape=(batch_size, max_seq_length, n_agents, n_actions)
+
+   gather这个函数似乎非常强大，应该搞懂是怎么用的。
+
+4. target是类似的，获取下一步的奖励。
+
+   注意，时间步连续的和独立的方法相差较大。
+
+5. double_dqn的操作：
+
+   ```python
+   # Max over target Q-Values
+   if self.args.double_q:
+       # Get actions that maximise live Q (for double q-learning)
+       mac_out_detach = mac_out.clone().detach()
+       mac_out_detach[avail_actions == 0] = -9999999
+       cur_max_actions = mac_out_detach[:, 1:].max(dim=3, keepdim=True)[1]
+       target_max_qvals = th.gather(target_mac_out, 3, cur_max_actions).squeeze(3)
+   else:
+       target_max_qvals = target_mac_out.max(dim=3)[0]
+   ```
+
+   注意这里detach的用法很关键。如果不进行detach，对mac_out的操作可能会将梯度传播至mac_out。但是究竟会有什么具体的影响，以及我还不清楚后向传播的梯度信息如何得到的、如何传播的。
+
+   特别说明，.max函数的作用是在dim这个维度上，然后返回一个长度为2的元组。[0]存储这个维度的最大值，[1]存储这个维度最大值的索引。
+
+6. mix设计
+
+   ```python
+   # Mix
+   if self.mixer is not None:
+       chosen_action_qvals = self.mixer(chosen_action_qvals, batch["state"][:, :-1])
+       target_max_qvals = self.target_mixer(target_max_qvals, batch["state"][:, 1:])
+   ```
+
+   这里用到了state，指的是全局状态。
+
+7. 计算loss
+
+   ```python
+   # Calculate 1-step Q-Learning targets
+   targets = rewards + self.args.gamma * target_max_qvals
+   
+   # Td-error
+   td_error = (chosen_action_qvals - targets.detach())
+   
+   loss = F.mse_loss(chosen_action_qvals, targets.detach())
+   ```
+
+   注意targets最后要detach，不然target的梯度也会被计入
+

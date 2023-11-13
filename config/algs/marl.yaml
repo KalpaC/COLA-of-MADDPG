@@ -14,24 +14,26 @@ buffer_size: 5000
 
 # update the target network every {} episodes
 target_update_interval: 200
-consensus_builder_embedding_dim: 4
+#consensus_builder_embedding_dim: 4
 
 # use the Q_Learner to train
 agent_output_type: "q"
-learner: "cola_learner"
+learner: "q_learner_for_v2x"
 double_q: True
-mixer: "qmix"
-mixing_embed_dim: 64
-hypernet_layers: 2
-hypernet_embed: 32
+#mixer: "qmix"
+mixer: null
+#mixing_embed_dim: 64
+#hypernet_layers: 2
+#hypernet_embed: 32
 
 # --- Agent parameters ---
-agent: "rnn" # Default rnn agent
+agent: "mlp" # Default rnn agent
+mac: "fingerprint_mac"
 #mlp_hidden_dim: 64
 mlp_hidden_dims: [500, 250, 120] # Sizes of each hidden state for default mlp agent
 obs_agent_id: False # Include the agent's one_hot id in the observation
 obs_last_action: False # Include the agent's last action (one_hot) in the observation
-
+finger_print: True
 
 #consensus_builder_hidden_dim: 64
 #consensus_builder_dim: 4

@@ -1,7 +1,10 @@
+import logging
+
 import torch as th
 import numpy as np
 from types import SimpleNamespace as SN
 
+from utils import get_track_logger
 
 
 class EpisodeBatch:
@@ -73,7 +76,8 @@ class EpisodeBatch:
             if episode_const:
                 self.data.episode_data[field_key] = th.zeros((batch_size, *shape), dtype=dtype, device=self.device)
             else:
-                self.data.transition_data[field_key] = th.zeros((batch_size, max_seq_length, *shape), dtype=dtype, device=self.device)
+                self.data.transition_data[field_key] = th.zeros((batch_size, max_seq_length, *shape), dtype=dtype,
+                                                                device=self.device)
 
     def extend(self, scheme, groups=None):
         self._setup_data(scheme, self.groups if groups is None else groups, self.batch_size, self.max_seq_length)
@@ -85,7 +89,7 @@ class EpisodeBatch:
             self.data.episode_data[k] = v.to(device)
         self.device = device
 
-    def update(self, data, bs=slice(None), ts=slice(None), mark_filled=True):
+    def update(self, data, bs=slice(None), ts=slice(None), mark_filled=False):
         slices = self._parse_slices((bs, ts))
         for k, v in data.items():
             if k in self.data.transition_data:
@@ -101,8 +105,13 @@ class EpisodeBatch:
                 raise KeyError("{} not found in transition or episode data".format(k))
 
             dtype = self.scheme[k].get("dtype", th.float32)
-            v = th.tensor(v, dtype=dtype, device=self.device)
-            self._check_safe_view(v, target[k][_slices])
+            v = th.tensor(v, dtype=dtype, device=self.device).clone().detach()
+            logger = get_track_logger()
+            if ts == 101:
+                logger.info(self.max_seq_length)
+                logger.info("v.shape={}".format(v.shape))
+                logger.info("target[{}][{}].shape={}".format(k, _slices, target[k][_slices].shape))
+                self._check_safe_view(v, target[k][_slices])
             target[k][_slices] = v.view_as(target[k][_slices])
 
             if k in self.preprocess:
@@ -143,7 +152,8 @@ class EpisodeBatch:
             new_scheme = {key: self.scheme[key] for key in item}
             new_groups = {self.scheme[key]["group"]: self.groups[self.scheme[key]["group"]]
                           for key in item if "group" in self.scheme[key]}
-            ret = EpisodeBatch(new_scheme, new_groups, self.batch_size, self.max_seq_length, data=new_data, device=self.device)
+            ret = EpisodeBatch(new_scheme, new_groups, self.batch_size, self.max_seq_length, data=new_data,
+                               device=self.device)
             return ret
         else:
             item = self._parse_slices(item)
@@ -164,7 +174,7 @@ class EpisodeBatch:
             return len(indexing_item)
         elif isinstance(indexing_item, slice):
             _range = indexing_item.indices(max_size)
-            return 1 + (_range[1] - _range[0] - 1)//_range[2]
+            return 1 + (_range[1] - _range[0] - 1) // _range[2]
 
     def _new_data_sn(self):
         new_data = SN()
@@ -176,9 +186,9 @@ class EpisodeBatch:
         parsed = []
         # Only batch slice given, add full time slice
         if (isinstance(items, slice)  # slice a:b
-            or isinstance(items, int)  # int i
-            or (isinstance(items, (list, np.ndarray, th.LongTensor, th.cuda.LongTensor)))  # [a,b,c]
-            ):
+                or isinstance(items, int)  # int i
+                or (isinstance(items, (list, np.ndarray, th.LongTensor, th.cuda.LongTensor)))  # [a,b,c]
+        ):
             items = (items, slice(None))
 
         # Need the time indexing to be contiguous
@@ -186,10 +196,10 @@ class EpisodeBatch:
             raise IndexError("Indexing across Time must be contiguous")
 
         for item in items:
-            #TODO: stronger checks to ensure only supported options get through
+            # TODO: stronger checks to ensure only supported options get through
             if isinstance(item, int):
                 # Convert single indices to slices
-                parsed.append(slice(item, item+1))
+                parsed.append(slice(item, item + 1))
             else:
                 # Leave slices and lists as is
                 parsed.append(item)
@@ -207,7 +217,8 @@ class EpisodeBatch:
 
 class ReplayBuffer(EpisodeBatch):
     def __init__(self, scheme, groups, buffer_size, max_seq_length, preprocess=None, device="cpu"):
-        super(ReplayBuffer, self).__init__(scheme, groups, buffer_size, max_seq_length, preprocess=preprocess, device=device)
+        super(ReplayBuffer, self).__init__(scheme, groups, buffer_size, max_seq_length, preprocess=preprocess,
+                                           device=device)
         self.buffer_size = buffer_size  # same as self.batch_size but more explicit
         self.buffer_index = 0
         self.episodes_in_buffer = 0
@@ -232,8 +243,16 @@ class ReplayBuffer(EpisodeBatch):
     def can_sample(self, batch_size):
         return self.episodes_in_buffer >= batch_size
 
-    def sample(self, batch_size):
+    def sample(self, batch_size, shuffle=False):
         assert self.can_sample(batch_size)
+        if shuffle:
+            res = EpisodeBatch(self.scheme, self.groups, batch_size, self.max_seq_length, device=self.device)
+            ep_ids = np.random.choice(self.episodes_in_buffer, batch_size, replace=False)
+            for i in batch_size:
+                t_ids = np.random.choice(self.max_seq_length, self.max_seq_length, replace=False)
+                for j in self.max_seq_length:
+                    res[i][j] = self[ep_ids[i], t_ids[j]]
+            return res
         if self.episodes_in_buffer == batch_size:
             return self[:batch_size]
         else:
@@ -246,4 +265,3 @@ class ReplayBuffer(EpisodeBatch):
                                                                         self.buffer_size,
                                                                         self.scheme.keys(),
                                                                         self.groups.keys())
-

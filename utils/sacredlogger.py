@@ -1,15 +1,16 @@
+import inspect
 from collections import defaultdict
 import logging
 import numpy as np
 
-class Logger:
-    def __init__(self, console_logger):
-        self.console_logger = console_logger
 
+
+class SacredLogger:
+    def __init__(self, console_logger: logging.Logger):
+        self.console_logger = console_logger
         self.use_tb = False
         self.use_sacred = False
         self.use_hdf = False
-
         self.stats = defaultdict(lambda: [])
 
     def setup_tb(self, directory_name):
@@ -53,7 +54,7 @@ class Logger:
 
 
 # set up a custom logger
-def get_logger():
+def setup_logger():
     logger = logging.getLogger()
     logger.handlers = []
     ch = logging.StreamHandler()
@@ -61,6 +62,9 @@ def get_logger():
     ch.setFormatter(formatter)
     logger.addHandler(ch)
     logger.setLevel('DEBUG')
-
     return logger
 
+def get_track_logger():
+    frame = inspect.currentframe().f_back
+    module = inspect.getmodule(frame)
+    return logging.getLogger(module.__name__)
