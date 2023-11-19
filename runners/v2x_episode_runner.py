@@ -1,5 +1,6 @@
 import logging
 
+import utils
 from envs import REGISTRY as env_REGISTRY
 from functools import partial
 from components.episode_buffer import EpisodeBatch
@@ -52,8 +53,9 @@ class EpisodeRunner:
 
         terminated = False
         episode_return = 0
+        # self.logger.console_logger.info("{}, t_env: {}".format("train" if not test_mode else "test",self.t_env))
         while not terminated:
-            self.logger.console_logger.info("t_env: {}, t: {}".format(self.t_env, self.t))
+            # self.logger.console_logger.info("t_env: {}, t: {}".format(self.t_env, self.t))
             pre_transition_data = {
                 # "state": [self.env.get_state()],
                 "avail_actions": [self.env.get_avail_actions()],
@@ -66,8 +68,8 @@ class EpisodeRunner:
             actions = self.mac.select_actions(self.batch, t_ep=self.t, t_env=self.t_env, test_mode=test_mode)
 
             reward, terminated, env_info = self.env.step(actions[0])
+            # utils.get_track_logger().info("t:{}, V2V_probability:{}".format(self.t, env_info["V2V_probability"]))
             episode_return += reward
-
             post_transition_data = {
                 "actions": actions,
                 "reward": [(reward,)],

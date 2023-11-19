@@ -8,6 +8,7 @@ from .v2i_calculator import V2I_Calculator
 from .formula import to_w
 from utils import get_track_logger
 
+
 class Channel:
     def __init__(self,
                  vehicles,
@@ -106,8 +107,7 @@ class Channel:
         self.V2V_rate_cache = None
         self.V2I_rate_cache = None
 
-
-    def get_V2V_rate(self, is_active, block_id, V2V_power_dB, V2I_power_dB):
+    def get_V2V_rate(self, is_active=None, block_id=None, V2V_power_dB=None, V2I_power_dB=None):
         if self.V2V_rate_cache is not None:
             return self.V2V_rate_cache
         V2V_Interference = np.zeros((len(self.vehicles), self.n_des))
@@ -146,7 +146,7 @@ class Channel:
         self.V2V_rate_cache = V2V_Rate.copy()
         return V2V_Rate
 
-    def get_V2I_rate(self, is_active, block_id, V2V_power_dB, V2I_power_dB):
+    def get_V2I_rate(self, is_active=None, block_id=None, V2V_power_dB=None, V2I_power_dB=None):
         if self.V2I_rate_cache is not None:
             return self.V2I_rate_cache
         V2I_Interference = np.zeros(self.n_RB)  # V2I interference

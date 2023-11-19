@@ -7,6 +7,8 @@ from modules.mixers.qmix import QMixer
 import torch as th
 from torch.optim import RMSprop
 import torch.nn.functional as F
+from utils import get_track_logger
+
 
 class QLearner:
     def __init__(self, mac, scheme, logger, args):
@@ -40,6 +42,7 @@ class QLearner:
         # Get the relevant quantities
         rewards = batch["reward"][:, :]
         actions = batch["actions"][:, :]
+        # get_track_logger().info("learning, t_env: {}".format(t_env))
 
         mac_out = []
         for t in range(batch.max_seq_length):

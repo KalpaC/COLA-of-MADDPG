@@ -44,6 +44,9 @@ class FingerPrintMAC:
     def load_models(self, path):
         self.agent.load_state_dict(th.load("{}/agent.th".format(path), map_location=lambda storage, loc: storage))
 
+    def load_state(self, other_mac):
+        self.agent.load_state_dict(other_mac.agent.state_dict())
+
     def _build_agents(self, input_shape):
         self.agent = agent_REGISTRY[self.args.agent](input_shape, self.args)
 

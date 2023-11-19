@@ -166,14 +166,14 @@ def run_sequential(args, logger):
         buffer.insert_episode_batch(episode_batch)
 
         if buffer.can_sample(args.batch_size):
-            print("ready to train")
-            get_track_logger().info("ready to train")
 
             episode_sample = buffer.sample(args.batch_size, shuffle=getattr(args, "shuffle", False))
 
-            # Truncate batch to only filled timesteps
-            max_ep_t = episode_sample.max_t_filled()
-            episode_sample = episode_sample[:, :max_ep_t]
+            masking = getattr(args, "masking", False)
+            if masking:
+                # Truncate batch to only filled timesteps
+                max_ep_t = episode_sample.max_t_filled()
+                episode_sample = episode_sample[:, :max_ep_t]
 
             if episode_sample.device != args.device:
                 episode_sample.to(args.device)

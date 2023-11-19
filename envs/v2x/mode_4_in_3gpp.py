@@ -378,7 +378,8 @@ class Mode_4_in_3GPP(MultiAgentEnv):
         # get_track_logger().info(block_id)
         V2V_rate = self.channel.get_V2V_rate(self.is_active, block_id, power, self.V2I_power)
         V2I_rate = self.channel.get_V2I_rate(self.is_active, block_id, power, self.V2I_power)
-        self.remain_payload -= (V2V_rate * self.time_slow * self.bandwidth).astype('int32')
+        transmit_payload_size = (V2V_rate * self.time_fast * self.bandwidth).astype('int32')
+        self.remain_payload -= transmit_payload_size
         self.remain_payload[self.remain_payload < 0] = 0
         self.remain_time -= self.time_fast
 
@@ -391,7 +392,8 @@ class Mode_4_in_3GPP(MultiAgentEnv):
         # 添加信道更新以及干扰计算
         self.channel.renew_fastfading()
         self.channel.get_V2V_rate(self.is_active, block_id, power, self.V2I_power)
-        return reward, self.remain_time <= 0, {}
+        info = {"V2I_rate": np.mean(V2I_rate), "V2V_probability": np.mean(np.logical_not(self.is_active))}
+        return reward, self.remain_time <= 0, info
 
     def get_obs(self):
         agents_obs = [self.get_obs_agent(i) for i in range(self.n_agents)]
@@ -444,3 +446,9 @@ class Mode_4_in_3GPP(MultiAgentEnv):
 
     def save_replay(self):
         pass
+
+    def get_env_info(self):
+        info = super().get_env_info()
+        info["V2I_rate"] = np.mean(self.channel.get_V2I_rate())
+        info["V2V_probability"] = np.mean(self.is_active)
+        return info

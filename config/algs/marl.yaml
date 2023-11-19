@@ -6,14 +6,15 @@ name: "marl"
 action_selector: "epsilon_greedy"
 epsilon_start: 1.0
 epsilon_finish: 0.05
-epsilon_anneal_time: 50000
+epsilon_anneal_time: 240000
 
 runner: "v2xepisode"
 
 buffer_size: 5000
+masking: False # True for problem which need masking, like time-related problem.
 
 # update the target network every {} episodes
-target_update_interval: 200
+target_update_interval: 4
 #consensus_builder_embedding_dim: 4
 
 # use the Q_Learner to train
@@ -34,7 +35,7 @@ mlp_hidden_dims: [500, 250, 120] # Sizes of each hidden state for default mlp ag
 obs_agent_id: False # Include the agent's one_hot id in the observation
 obs_last_action: False # Include the agent's last action (one_hot) in the observation
 finger_print: True
-
+t_max: 300000
 #consensus_builder_hidden_dim: 64
 #consensus_builder_dim: 4
 #
