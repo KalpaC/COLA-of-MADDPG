@@ -14,7 +14,7 @@ import logging
 
 from run import run
 
-SETTINGS['CAPTURE_MODE'] = "fd"  # set to "no" if you want to see stdout/stderr in console
+SETTINGS['CAPTURE_MODE'] = "sys"  # set to "no" if you want to see stdout/stderr in console
 logger = setup_logger()  # only a console_logger
 
 

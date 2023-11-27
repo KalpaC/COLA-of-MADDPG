@@ -44,3 +44,4 @@ t_max: 300000
 #online_temp: 0.1
 #target_temp: 0.04
 #input: "obs" # "obs" or "hidden"
+

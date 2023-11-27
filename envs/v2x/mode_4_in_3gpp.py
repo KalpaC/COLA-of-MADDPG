@@ -1,6 +1,9 @@
 # mode_4_in_3gpp 2023/10/19 17:18
+import datetime
 import logging
 import math
+import os
+import time
 
 import numpy as np
 import torch
@@ -11,6 +14,9 @@ from exceptions import IllegalArgumentException
 from .util import V2V_Calculator
 from .util import V2I_Calculator
 from .util import Channel
+from components import ReplayBuffer
+from types import SimpleNamespace as SN
+import pickle
 
 
 class Vehicle:
@@ -23,83 +29,52 @@ class Vehicle:
 
 
 class Mode_4_in_3GPP(MultiAgentEnv):
-    def __init__(
-            self,
-            grid_x_length=250,
-            grid_y_length=433,
-            lane_width=3.5,
-            lane_amount=2,
-            grid_x_amount=3,
-            grid_y_amount=3,
-            bs_position_x=375,
-            bs_position_y=649.5,
-            bs_ant_height=25,
-            bs_ant_gain=8,
-            bs_noise_figure=5,
-            veh_amount=4,
-            veh_ant_height=1.5,
-            veh_ant_gain=3,
-            veh_noise_figure=9,
-            veh_velocity="10-15,m/s",
-            carry_frequency=2,
-            resource_blocks=4,
-            bandwidth=1,
-            V2V_power_levels=(23, 10, 5, -100),
-            sig2_dB=-114,
-            V2V_decorrelation_distance=10,
-            V2V_shadow_std=3,
-            neighbor_amount=1,
-            V2I_decorrelation_distance=50,
-            V2I_shadow_std=8,
-            payload_size=1060,
-            time_budget=0.1,
-            V2I_power=23,
-            time_fast=0.001,
-            seed=7777
-    ):
+    def __init__(self, **env_args):
+        env_args = SN(**env_args)
         # map_args:
-        self.n_actions = resource_blocks * len(V2V_power_levels)  # 动作空间由(rb_id, power_level)组成
-        self.n_agents = veh_amount * neighbor_amount  # 该环境假设每辆车与附近的neighbor_amount个车建立V2V通信，并各作为一个agent
+        self.n_actions = env_args.resource_blocks * len(env_args.V2V_power_levels)  # 动作空间由(rb_id, power_level)组成
+        self.n_agents = env_args.veh_amount * env_args.neighbor_amount  # 该环境假设每辆车与附近的neighbor_amount个车建立V2V通信，并各作为一个agent
         # 地图由重复的方格组成，默认在其中心位置有唯一基站。
-        self.grid_x_length = grid_x_length  # 方格横向长度
-        self.grid_y_length = grid_y_length  # 方格纵向长度
-        self.lane_width = lane_width  # 车道宽度
-        self.lane_amount = lane_amount  # 单向车道数量
-        self.grid_x_amount = grid_x_amount  # 横向方格数量
-        self.grid_y_amount = grid_y_amount  # 纵向方格数量
+        self.grid_x_length = env_args.grid_x_length  # 方格横向长度
+        self.grid_y_length = env_args.grid_y_length  # 方格纵向长度
+        self.lane_width = env_args.lane_width  # 车道宽度
+        self.lane_amount = env_args.lane_amount  # 单向车道数量
+        self.grid_x_amount = env_args.grid_x_amount  # 横向方格数量
+        self.grid_y_amount = env_args.grid_y_amount  # 纵向方格数量
         # bs_args:
-        self.bs_position_x = bs_position_x  # 基站位置横坐标
-        self.bs_position_y = bs_position_y  # 基站位置纵坐标
-        self.bs_ant_height = bs_ant_height  # 基站天线高度
-        self.bs_ant_gain = bs_ant_gain  # 基站天线增益分贝
-        self.bs_noise_figure = bs_noise_figure  # 天线处噪声功率
+        self.bs_position_x = env_args.bs_position_x  # 基站位置横坐标
+        self.bs_position_y = env_args.bs_position_y  # 基站位置纵坐标
+        self.bs_ant_height = env_args.bs_ant_height  # 基站天线高度
+        self.bs_ant_gain = env_args.bs_ant_gain  # 基站天线增益分贝
+        self.bs_noise_figure = env_args.bs_noise_figure  # 天线处噪声功率
         # veh_args:
-        self.veh_amount = veh_amount  # 车辆数量
-        self.veh_ant_height = veh_ant_height  # 车辆天线高度
-        self.veh_ant_gain = veh_ant_gain  # 车辆天线增益
-        self.veh_noise_figure = veh_noise_figure  # 车辆天线噪声
-        self.veh_velocity = veh_velocity  # 车辆速度，注意格式
+        self.veh_amount = env_args.veh_amount  # 车辆数量
+        self.veh_ant_height = env_args.veh_ant_height  # 车辆天线高度
+        self.veh_ant_gain = env_args.veh_ant_gain  # 车辆天线增益
+        self.veh_noise_figure = env_args.veh_noise_figure  # 车辆天线噪声
+        self.veh_velocity = env_args.veh_velocity  # 车辆速度，注意格式
         # V2X_args
-        self.carry_frequency = carry_frequency  # 载波频率，单位为GHz
-        self.resource_blocks = resource_blocks  # 资源块数量/子信道数量
-        self.bandwidth = bandwidth * int(1e6)  # 信道带宽B
-        self.V2V_power_levels = np.asarray(V2V_power_levels)  # 可选离散功率列表
-        self.sig2_dB = sig2_dB  # 似乎是噪声方差
+        self.carry_frequency = env_args.carry_frequency  # 载波频率，单位为GHz
+        self.resource_blocks = env_args.resource_blocks  # 资源块数量 或者说 子信道数量
+        self.bandwidth = env_args.bandwidth * int(1e6)  # 子信道带宽B
+        self.V2V_power_levels = np.asarray(env_args.V2V_power_levels)  # 可选离散功率列表
+        self.sig2_dB = env_args.sig2_dB  # 似乎是噪声方差
         #  V2V_args
-        self.V2V_decorrelation_distance = V2V_decorrelation_distance  # 用于计算pathloss的值
-        self.V2V_shadow_std = V2V_shadow_std  # 阴影衰落标准差
-        self.neighbor_amount = neighbor_amount  # 每辆车通信邻居数量
+        self.V2V_decorrelation_distance = env_args.V2V_decorrelation_distance  # 用于计算pathloss的值
+        self.V2V_shadow_std = env_args.V2V_shadow_std  # 阴影衰落标准差
+        self.neighbor_amount = env_args.neighbor_amount  # 每辆车通信邻居数量
         #  V2I_args
-        self.V2I_decorrelation_distance = V2I_decorrelation_distance
-        self.V2I_shadow_std = V2I_shadow_std
-        self.payload_size = payload_size * 8  # 载荷bit数
-        self.time_budget = time_budget  # 单一报文的时间预算
-        self.V2I_power = V2I_power  # V2I信道固定功率
-        self.time_fast = time_fast  # 快速衰落时间
-        self.seed = seed  # 用于环境的种子
+        self.V2I_decorrelation_distance = env_args.V2I_decorrelation_distance
+        self.V2I_shadow_std = env_args.V2I_shadow_std
+        self.payload_size = env_args.payload_size * 8  # 载荷bit数
+        self.time_budget = env_args.time_budget  # 单一报文的时间预算
+        self.V2I_power = env_args.V2I_power  # V2I信道固定功率
+        self.time_fast = env_args.time_fast  # 快速衰落时间
+        self.seed = env_args.seed  # 用于环境的种子
         np.random.seed(self.seed)
+        self.replay_dir = env_args.replay_dir
 
-        self.episode_limit = int(time_budget // time_fast)  # 最多时间步数量
+        self.episode_limit = int(env_args.time_budget // env_args.time_fast)  # 最多时间步数量
 
         # compute useful args
         self.map_x_length = self.grid_x_length * self.grid_x_amount
@@ -110,6 +85,21 @@ class Mode_4_in_3GPP(MultiAgentEnv):
         self.channel = None
         self._init_map()
         self.reset_game()
+        replay_scheme = {
+            "position": {"vshape": (2,), "group": "vehicles"},
+            "neighbors": {"vshape": (self.neighbor_amount,), "group": "vehicles"},
+            # "V2V_rate_mean": {"vshape": (self.neighbor_amount,), "group": "vehicles"},
+            "V2V_time": {"vshape": (self.neighbor_amount,), "group": "vehicles"},
+            "total_V2I_bytes": {"vshape": (1,), "group": "vehicles"},
+        }
+        group = {
+            "vehicles": self.veh_amount,
+        }
+        self._replay = ReplayBuffer(replay_scheme, group, 1, env_args.t_max + 1, device="cpu")
+        self.t_episode = -1  # to count from 0
+        self.finished_time = - np.ones((self.veh_amount, self.neighbor_amount),
+                                       np.float)  # to record V2V payload transmit time
+        self.V2I_bytes = np.zeros((self.veh_amount,), dtype=np.int)
 
     def reset_game(self):
         self._init_vehicles()
@@ -144,6 +134,7 @@ class Mode_4_in_3GPP(MultiAgentEnv):
         block_id, power = self._get_agents_actions(sample_action)
         self.channel.get_V2V_rate(self.is_active, block_id, power, self.V2I_power)
         self.channel.get_V2I_rate(self.is_active, block_id, power, self.V2I_power)
+        self.t_episode = 0
 
     def _init_map(self):
         self.lanes = {
@@ -343,9 +334,15 @@ class Mode_4_in_3GPP(MultiAgentEnv):
                                 self.vehicles[i].position = [self.down_lanes[-1], self.vehicles[i].position[1]]
 
             i += 1
-
         # 更新邻居
         self.get_destination()
+        self.t_episode = self.t_episode + 1
+        self.t = 0
+        vehicle_info = {
+            "position": [v.position for v in self.vehicles],
+            "neighbors": [v.neighbors for v in self.vehicles],
+        }
+        self._replay.update(vehicle_info, ts=self.t_episode)
 
     def get_destination(self):
         # 找到对每辆车找到距离它最近的self.n_des辆车
@@ -358,7 +355,7 @@ class Mode_4_in_3GPP(MultiAgentEnv):
                 distance[i][j] = np.linalg.norm(positions[i] - positions[j])
         for i in range(self.veh_amount):
             sort_idx = np.argsort(distance[:, i])
-            self.vehicles[i].neighbors = sort_idx[1:1 + self.veh_amount]
+            self.vehicles[i].neighbors = sort_idx[1:1 + self.neighbor_amount]
 
     def _get_agents_actions(self, action: np.ndarray):
         assert self.veh_amount * self.neighbor_amount == self.n_agents
@@ -368,32 +365,54 @@ class Mode_4_in_3GPP(MultiAgentEnv):
         return block_id, power
 
     def _renew_for_episode(self):
+        if self.t_episode != -1:
+            transmit_info = {
+                "V2V_time": [self.finished_time],
+                "total_V2I_bytes": [self.V2I_bytes]
+            }
+            self._replay.update(transmit_info, ts=self.t_episode)
+        self._reset_record()
         self._reset_payload()
         self._reset_time()
         self._renew_positions()
         self.channel.renew()
 
+    def _reset_record(self):
+        self.finished_time = - np.ones((self.veh_amount, self.neighbor_amount),
+                                       np.float)  # to record V2V payload transmit time
+        self.V2I_bytes = np.zeros((self.veh_amount,), dtype=np.int)
+
     def step(self, actions: np.ndarray):
         block_id, power = self._get_agents_actions(actions)  # 返回agents实际选择的rb编号列表数组以及功率数组
-        # get_track_logger().info(block_id)
         V2V_rate = self.channel.get_V2V_rate(self.is_active, block_id, power, self.V2I_power)
         V2I_rate = self.channel.get_V2I_rate(self.is_active, block_id, power, self.V2I_power)
-        transmit_payload_size = (V2V_rate * self.time_fast * self.bandwidth).astype('int32')
-        self.remain_payload -= transmit_payload_size
+        self.remain_payload -= (V2V_rate * self.time_fast * self.bandwidth).astype('int32')
         self.remain_payload[self.remain_payload < 0] = 0
         self.remain_time -= self.time_fast
 
+        # 记录
+
         reward_elements = V2V_rate / 10
         reward_elements[self.remain_payload <= 0] = 1
+        old_is_active = self.is_active.copy()
         self.is_active[np.multiply(self.is_active, self.remain_payload <= 0)] = 0
+        # 记录结束时间
+        self.t += self.time_fast
+        new_done = np.logical_and(old_is_active == 1, self.is_active == 0)
+        self.record_step(V2I_rate, new_done)
         l = 0.1
         reward = l * np.sum(V2I_rate) / (self.veh_amount * 10) + (1 - l) * np.sum(reward_elements) / (
                 self.veh_amount * self.neighbor_amount)
         # 添加信道更新以及干扰计算
         self.channel.renew_fastfading()
         self.channel.get_V2V_rate(self.is_active, block_id, power, self.V2I_power)
+
         info = {"V2I_rate": np.mean(V2I_rate), "V2V_probability": np.mean(np.logical_not(self.is_active))}
         return reward, self.remain_time <= 0, info
+
+    def record_step(self, V2I_rate, new_done):
+        self.V2I_bytes += (V2I_rate * self.time_fast * self.bandwidth).astype('int32')
+        self.finished_time[new_done == 1] = self.t
 
     def get_obs(self):
         agents_obs = [self.get_obs_agent(i) for i in range(self.n_agents)]
@@ -445,7 +464,10 @@ class Mode_4_in_3GPP(MultiAgentEnv):
         return self.seed
 
     def save_replay(self):
-        pass
+        """保存车辆位置信息"""
+        unique_token = "{}__{}".format("v2x_mode4.pkl", datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
+        with open(os.path.join(self.replay_dir, unique_token), "wb") as f:
+            pickle.dump(self._replay, f)
 
     def get_env_info(self):
         info = super().get_env_info()

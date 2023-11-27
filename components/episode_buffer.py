@@ -125,11 +125,7 @@ class EpisodeBatch:
             dtype = self.scheme[k].get("dtype", th.float32)
             v = th.tensor(v, dtype=dtype, device=self.device).clone().detach()
             logger = get_track_logger()
-            if ts == 101:
-                logger.info(self.max_seq_length)
-                logger.info("v.shape={}".format(v.shape))
-                logger.info("target[{}][{}].shape={}".format(k, _slices, target[k][_slices].shape))
-                self._check_safe_view(v, target[k][_slices])
+            self._check_safe_view(v, target[k][_slices])
             target[k][_slices] = v.view_as(target[k][_slices])
 
             if k in self.preprocess:

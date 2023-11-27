@@ -46,3 +46,5 @@ env_args:
   time_fast: 0.001
   seed: 7777
 
+  replay_dir: "./v2x_replay"
+
